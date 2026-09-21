@@ -1,11 +1,15 @@
 # Server setup adapted from the FastMCP quickstart in the MCP Python SDK README:
 # https://github.com/modelcontextprotocol/python-sdk
+import ipaddress
 import logging
+import socket
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import feedparser
 import httpx
+from bs4 import BeautifulSoup
 from dotenv import dotenv_values
 from mcp.server.fastmcp import FastMCP
 from notion_client import Client
@@ -25,6 +29,8 @@ FEEDS = {
     "mind_the_product": "https://www.mindtheproduct.com/feed/",
     "ux_collective": "https://uxdesign.cc/feed",
 }
+
+ALLOWED_DOMAINS = {"nngroup.com", "smashingmagazine.com", "mindtheproduct.com", "uxdesign.cc"}
 
 mcp = FastMCP("pm-knowledge")
 
@@ -77,6 +83,67 @@ def save_to_notion(title: str, url: str, source: str,
         log.exception("Notion save failed")
         return {"error": "Could not save to Notion. Check the server log."}
     return {"saved": True, "notion_url": page["url"]}
+
+
+def is_safe_url(url: str) -> bool:
+    """Return True only if url is safe to fetch (SSRF protection)."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+
+    # Check 1: only web schemes, and the URL must have a hostname.
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if not hostname:
+        return False
+
+    # Check 2: hostname must be an allowed domain or a subdomain of one.
+    allowed = any(
+        hostname == domain or hostname.endswith("." + domain)
+        for domain in ALLOWED_DOMAINS
+    )
+    if not allowed:
+        return False
+
+    # Check 3: the hostname must not resolve to an internal address.
+    try:
+        ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+    except (socket.gaierror, ValueError):
+        return False
+    if ip.is_private or ip.is_loopback or ip.is_link_local:
+        return False
+
+    return True
+
+
+@mcp.tool()
+def fetch_article(url: str) -> dict:
+    """Fetch the readable text of an article from an approved PM/design site."""
+    if not is_safe_url(url):
+        return {"error": "URL not allowed."}
+    try:
+        resp = httpx.get(url, timeout=10, follow_redirects=False)
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        log.exception("Article fetch failed")
+        return {"error": "Could not fetch article."}
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+    text = " ".join(soup.get_text(" ").split())
+    return {"url": url, "text": text[:8000]}
+
+
+@mcp.prompt()
+def skill_digest(skill_area: str, per_source: int = 2) -> str:
+    """Build a Notion digest of recent articles on one PM/design skill."""
+    return f"""Build a learning digest on "{skill_area}".
+
+1. Call fetch_feed for each source: nngroup, smashing_ux, mind_the_product, ux_collective.
+2. From each, pick up to {per_source} articles genuinely about {skill_area}. Skip anything that only mentions it in passing.
+3. For each pick, call fetch_article to read the full text.
+4. Write 3-5 takeaways per article. Each must be specific enough to act on: a method, a number, a named framework, or a mistake to avoid. No generic advice like "talk to users."
+5. Call save_to_notion for each, with 1-3 skill_areas tags.
+6. Finish with a short summary: what you saved and any theme that came up across sources."""
 
 
 if __name__ == "__main__":
