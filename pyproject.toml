@@ -1,0 +1,13 @@
+[project]
+name = "pm-knowledge"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "feedparser>=6.0.14",
+    "httpx>=0.28.1",
+    "mcp[cli]>=2.2.0",
+    "notion-client>=3.1.0",
+    "python-dotenv>=1.2.3",
+]
