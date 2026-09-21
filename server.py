@@ -4,6 +4,8 @@ import ipaddress
 import logging
 import socket
 import sys
+import time
+from collections import deque
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -31,6 +33,29 @@ FEEDS = {
 }
 
 ALLOWED_DOMAINS = {"nngroup.com", "smashingmagazine.com", "mindtheproduct.com", "uxdesign.cc"}
+
+
+class RateLimiter:
+    """Sliding-window rate limiter: at most max_calls per period (seconds)."""
+
+    def __init__(self, max_calls: int, period: float):
+        self.max_calls = max_calls
+        self.period = period
+        self.calls = deque()
+
+    def allow(self) -> bool:
+        now = time.monotonic()
+        # Drop timestamps that have fallen outside the window.
+        while self.calls and now - self.calls[0] > self.period:
+            self.calls.popleft()
+        if len(self.calls) >= self.max_calls:
+            return False
+        self.calls.append(now)
+        return True
+
+
+notion_limiter = RateLimiter(max_calls=10, period=60)
+fetch_limiter = RateLimiter(max_calls=30, period=60)
 
 mcp = FastMCP("pm-knowledge")
 
@@ -67,6 +92,8 @@ def save_to_notion(title: str, url: str, source: str,
     """Save one article to the Notion knowledge database.
     skill_areas: short tags like 'user research' or 'prioritization'.
     takeaways: 3-5 concrete takeaways, one per line."""
+    if not notion_limiter.allow():
+        return {"error": "Rate limit reached: max 10 Notion saves per minute. Try again shortly."}
     try:
         page = notion.pages.create(
             parent={"database_id": DATABASE_ID},
@@ -118,6 +145,8 @@ def is_safe_url(url: str) -> bool:
 @mcp.tool()
 def fetch_article(url: str) -> dict:
     """Fetch the readable text of an article from an approved PM/design site."""
+    if not fetch_limiter.allow():
+        return {"error": "Rate limit reached: max 30 article fetches per minute."}
     if not is_safe_url(url):
         return {"error": "URL not allowed."}
     try:
