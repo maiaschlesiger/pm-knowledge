@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pm-knowledge": {
+      "command": "/Users/mschl/.local/bin/uv",
+      "args": ["--directory", "/Users/mschl/Desktop/projects/pm-knowledge", "run", "server.py"]
+    }
+  }
+}

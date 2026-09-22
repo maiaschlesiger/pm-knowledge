@@ -163,12 +163,12 @@ def fetch_article(url: str) -> dict:
 
 
 @mcp.prompt()
-def skill_digest(skill_area: str, per_source: int = 2) -> str:
+def skill_digest(skill_area: str) -> str:
     """Build a Notion digest of recent articles on one PM/design skill."""
     return f"""Build a learning digest on "{skill_area}".
 
 1. Call fetch_feed for each source: nngroup, smashing_ux, mind_the_product, ux_collective.
-2. From each, pick up to {per_source} articles genuinely about {skill_area}. Skip anything that only mentions it in passing.
+2. From each, pick up to 2 articles genuinely about {skill_area}. Skip anything that only mentions it in passing.
 3. For each pick, call fetch_article to read the full text.
 4. Write 3-5 takeaways per article. Each must be specific enough to act on: a method, a number, a named framework, or a mistake to avoid. No generic advice like "talk to users."
 5. Call save_to_notion for each, with 1-3 skill_areas tags.
